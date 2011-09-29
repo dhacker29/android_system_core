@@ -362,6 +362,114 @@ extern "C" {
 // ---------------------------------------------------------------------
 
 /*
+ * KPI Logging
+ */
+
+typedef struct {
+    char *key;
+    char *value;
+}KEY_VALUE_T;
+
+typedef struct {
+    int numKeyValuePairs;
+    KEY_VALUE_T **keyvalues;
+}EXTRALOGS_T;
+
+#define LOG_TAG_L1 "MOT_DEVICE_KPI_L1"
+#define LOG_TAG_L2 "MOT_DEVICE_KPI_L2"
+#define LOG_TAG_L3 "MOT_DEVICE_KPI_L3"
+
+#define KPI_VERSION "1.0"
+
+#define KPI_P 1
+#define KPI_E 2
+
+#define LEVEL_1 1
+#define LEVEL_2 2
+#define LEVEL_3 3
+
+#define ALLOC_EXTRALOGS(_e, _size)                                        \
+    _e = (EXTRALOGS_T *)malloc(sizeof(EXTRALOGS_T));                      \
+    _e->numKeyValuePairs = _size;                                         \
+    _e->keyvalues = (KEY_VALUE_T **)malloc(sizeof(KEY_VALUE_T *) * _size);
+
+#define SET_KEYVALUE(_kv, _k, _v)                                         \
+    _kv = (KEY_VALUE_T*)malloc(sizeof(KEY_VALUE_T));                      \
+    _kv->key = (char *)malloc(sizeof(char) * (strlen(_k) + 1));           \
+    strcpy(_kv->key, _k);                                                 \
+    _kv->value = (char *)malloc(sizeof(char) * (strlen(_v) + 1));         \
+    strcpy(_kv->value, _v);
+
+#define FREE_EXTRALOGS(_e)                                                \
+    int _i;                                                               \
+    for (_i=0; _i<_e->numKeyValuePairs; _i++) {                           \
+        free(_e->keyvalues[_i]->key);                                     \
+        free(_e->keyvalues[_i]->value);                                   \
+        free(_e->keyvalues[_i]);                                          \
+    }                                                                     \
+    free(_e->keyvalues);                                                  \
+    free(_e);                                                             \
+    _e = NULL;
+
+#define LOG_KPI(_logtype, _level, _component, _action, _extralogs) {      \
+    char _propBuf[PROPERTY_VALUE_MAX];                                    \
+    property_get("ro.build.type", _propBuf, "user");                      \
+    if (((strcmp(_propBuf, "user") == 0 ) && (_logtype == KPI_P))         \
+        || (strcmp(_propBuf, "user") != 0)) {                             \
+    struct timeval _tv;                                                   \
+    int _i = 0;                                                           \
+    int _len = 0;                                                         \
+    EXTRALOGS_T *_extras = _extralogs;                                    \
+    if (_extras != NULL) {                                                \
+        for (_i=0; _i< _extras->numKeyValuePairs; _i++) {                 \
+            _len += strlen(_extras->keyvalues[_i]->key);                  \
+            _len += strlen(_extras->keyvalues[_i]->value);                \
+            _len += 2;                                                    \
+        }                                                                 \
+    }                                                                     \
+    gettimeofday(&_tv, (struct timezone *) NULL);                         \
+    long long _time = _tv.tv_sec * 1000LL + _tv.tv_usec / 1000;           \
+    int _hdrlen = 85;                                                     \
+    char *_logbuf = (char *) malloc(sizeof(char) *                        \
+          (_hdrlen + strlen(_component) + strlen(_action) + _len + 1));   \
+    *_logbuf='\0';                                                        \
+    sprintf(_logbuf, "[ID=KPI;v=%s;t=%lld;c=%s;a=%s;]",                   \
+          KPI_VERSION, _time, _component, _action);                       \
+    if (_len > 0) {                                                       \
+        strcat(_logbuf, "[ID=ext;");                                      \
+        for (_i=0; _i< _extras->numKeyValuePairs; _i++) {                 \
+            strcat(_logbuf, _extras->keyvalues[_i]->key);                 \
+            strcat(_logbuf, "=");                                         \
+            strcat(_logbuf, _extras->keyvalues[_i]->value);               \
+            strcat(_logbuf, ";");                                         \
+        }                                                                 \
+        strcat(_logbuf, "]");                                             \
+    }                                                                     \
+    if (_level == LEVEL_1) {                                              \
+        LOG(LOG_INFO, LOG_TAG_L1, "%s", (const char *)_logbuf);           \
+    } else if (_level == LEVEL_2) {                                       \
+        LOG(LOG_INFO, LOG_TAG_L2, "%s", (const char *)_logbuf);           \
+    } else if (_level == LEVEL_3) {                                       \
+        LOG(LOG_INFO, LOG_TAG_L3, "%s", (const char *)_logbuf);           \
+    }                                                                     \
+    free(_logbuf);                                                        \
+    }                                                                     \
+}
+
+/*
+ * Accumulated stats logging for native clients
+ */
+#define LOG_ACCUMSTATS_TAG "MOT_DEVICE_ACCUM_STATS"
+#define LOG_ACCUMSTATS(_component, _statsName, _key, _value) {         \
+    LOG(LOG_INFO, LOG_ACCUMSTATS_TAG, "%s,%s,%s,%s",                   \
+        _component, _statsName, _key, _value);                         \
+}
+
+// End: KPI Logging
+
+// ---------------------------------------------------------------------
+
+/*
  * Event logging.
  */
 
