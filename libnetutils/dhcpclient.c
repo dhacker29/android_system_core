@@ -29,12 +29,24 @@
 #include <sys/select.h>
 #include <sys/types.h>
 #include <netinet/in.h>
+#ifdef USE_MOTOROLA_CODE
+// BEGIN MOT GB UPMERGE, a5705c, 12/21/2010
+#include <arpa/inet.h>
+// END MOT GB UPMERGE
+#endif
 
 #include <cutils/properties.h>
 #define LOG_TAG "DHCP"
 #include <cutils/log.h>
 
 #include <dirent.h>
+
+#ifdef USE_MOTOROLA_CODE
+// BEGIN MOT GB UPMERGE, a5705c, 12/21/2010
+#include <stdbool.h>
+#include <ctype.h>
+// END MOT GB UPMERGE
+#endif
 
 #include "dhcpmsg.h"
 #include "ifc_utils.h"
@@ -114,6 +126,9 @@ struct dhcp_info {
 };
 
 dhcp_info last_good_info;
+#ifdef USE_MOTOROLA_CODE
+dhcp_info dhcp_tunnel_info;
+#endif
 
 void get_dhcp_info(uint32_t *ipaddr, uint32_t *gateway, uint32_t *mask,
                    uint32_t *dns1, uint32_t *dns2, uint32_t *server,
@@ -128,7 +143,35 @@ void get_dhcp_info(uint32_t *ipaddr, uint32_t *gateway, uint32_t *mask,
     *lease = last_good_info.lease;
 }
 
+#ifdef USE_MOTOROLA_CODE
+// BEGIN MOT GB UPMERGE, a5705c, 12/21/2010
+void get_dhcp_tunnel_info(uint32_t *ipaddr,
+                          uint32_t *gateway,
+                          uint32_t *mask,
+                          uint32_t *dns1,
+                          uint32_t *dns2,
+                          uint32_t *server,
+                          uint32_t *lease)
+{
+    if (ipaddr) *ipaddr = dhcp_tunnel_info.ipaddr;
+    if (gateway) *gateway = dhcp_tunnel_info.gateway;
+    if (mask) *mask = dhcp_tunnel_info.netmask;
+    if (dns1) *dns1 = dhcp_tunnel_info.dns1;
+    if (dns2) *dns2 = dhcp_tunnel_info.dns2;
+    if (server) *server = dhcp_tunnel_info.serveraddr;
+    if (lease) *lease = dhcp_tunnel_info.lease;
+}
+#define MAX_ADDR   16 // xxx.xxx.xxx.xxx
+#define MAX_SUBNET 32 // xxx.xxx.xxx.xxx/xxx.xxx.xxx.xxx
+#define TUN_STATUS_COMPLETE     "complete"
+#define TUN_STATUS_EXPIRED      "expired"
+
+static int ifc_configure(const char *ifname, dhcp_info *info,
+                         bool is_primary, const char *subnets)
+// END MOT GB UPMERGE
+#else
 static int ifc_configure(const char *ifname, dhcp_info *info)
+#endif
 {
     char dns_prop_name[PROPERTY_KEY_MAX];
     char gw_prop_name[PROPERTY_KEY_MAX];
@@ -141,7 +184,104 @@ static int ifc_configure(const char *ifname, dhcp_info *info)
         printerr("failed to set netmask %s: %s\n", ipaddr(info->netmask), strerror(errno));
         return -1;
     }
+
+#ifdef USE_MOTOROLA_CODE
+    // BEGIN MOT GB UPMERGE, a5705c, 12/21/2010
+    if (!is_primary) {
+        if (ifc_create_secondary_route(ifname,
+                                       info->ipaddr,
+                                       info->netmask,
+                                       info->gateway) && errno != EEXIST) {
+            printerr("failed to set secondary route addr %s: %s\n",
+                     ipaddr(info->ipaddr),
+                     strerror(errno));
+            printerr("netmask %s\n", ipaddr(info->netmask));
+            printerr("gateway %s\n", ipaddr(info->gateway));
+            return -1;
+        }
+
+        if (subnets != NULL && strlen(subnets) > 0) {
+            const char *psub = subnets;
+            char onesub[MAX_SUBNET];
+            while (*psub && !isspace(*psub)) {
+                const char *psub_next = strchr(psub, ',');
+                if (!psub_next) psub_next = strchr(psub, '\0');
+                if (!psub_next) {
+                    printerr("error parsing subnets\n");
+                    return -1;
+                }
+                if ((psub_next-psub) >= (int)sizeof(onesub)) {
+                    printerr("error parsing subnets: entry too long\n");
+                    return -1;
+                }
+                memset(onesub, '\0', sizeof(onesub));
+                strncpy(onesub, psub, psub_next-psub);
+
+                char *sub_mask = onesub, *sub_ip;
+                sub_ip = strsep(&sub_mask, "/");
+                if (!sub_mask || !sub_ip) {
+                    printerr("error parsing subnets: ip/mask syntax\n");
+                    return -1;
+                }
+
+                struct sockaddr_in sub_mask_addr, sub_ip_addr;
+                if (!inet_aton(sub_ip, &(sub_ip_addr.sin_addr)) ||
+                    !inet_aton(sub_mask, &(sub_mask_addr.sin_addr))) {
+                    printerr("error parsing subnets: inet_aton\n");
+                    return -1;
+                }
+
+                int extra_route = ifc_create_secondary_route(ifname,
+                                               sub_ip_addr.sin_addr.s_addr,
+                                               sub_mask_addr.sin_addr.s_addr,
+                                               info->gateway);
+                if (extra_route && errno != EEXIST) {
+                    printerr("failed to set extra subnet route addr %s: %s (%d)\n",
+                             ipaddr(sub_ip_addr.sin_addr.s_addr),
+                             strerror(errno), errno);
+                    printerr("netmask %s\n",
+                             ipaddr(sub_mask_addr.sin_addr.s_addr));
+                    return -1;
+                } else if (!extra_route) {
+                    LOGD("set additional route: %s",
+                         ipaddr(sub_ip_addr.sin_addr.s_addr &
+                                sub_mask_addr.sin_addr.s_addr));
+                } else {
+                    LOGD("skipped additional route (already exists): %s",
+                         ipaddr(sub_ip_addr.sin_addr.s_addr &
+                                sub_mask_addr.sin_addr.s_addr));
+                }
+
+                psub = psub_next;
+                if (*psub == ',') psub++;
+            }
+        }
+
+        snprintf(dns_prop_name, sizeof(dns_prop_name),
+                 "vpn.net.%s.dns1", ifname);
+        property_set(dns_prop_name, info->dns1 ? ipaddr(info->dns1) : "");
+        snprintf(dns_prop_name, sizeof(dns_prop_name),
+                 "vpn.net.%s.dns2", ifname);
+        property_set(dns_prop_name, info->dns2 ? ipaddr(info->dns2) : "");
+        snprintf(dns_prop_name, sizeof(dns_prop_name),
+                 "vpn.net.%s.status", ifname);
+        property_set(dns_prop_name, TUN_STATUS_COMPLETE);
+
+        dhcp_tunnel_info = *info;
+
+        return 0;
+    }
+    // END MOT GB UPMERGE
+
+#endif
     if (ifc_create_default_route(ifname, info->gateway)) {
+#ifdef USE_MOTOROLA_CODE
+        // BEGIN MOT GB UPMERGE, a5705c, 12/21/2010
+        printerr("failed to set default route %s: %s\n",
+                 ipaddr(info->gateway), strerror(errno));
+        // END MOT GB UPMERGE
+#else
+#endif
         printerr("failed to set default route %s: %s\n", ipaddr(info->gateway), strerror(errno));
         return -1;
     }
@@ -402,11 +542,22 @@ static int is_valid_reply(dhcp_msg *msg, dhcp_msg *reply, int sz)
 
 #define STATE_SELECTING  1
 #define STATE_REQUESTING 2
+#ifdef USE_MOTOROLA_CODE
+#define STATE_RENEWING   3
+#endif
 
 #define TIMEOUT_INITIAL   4000
 #define TIMEOUT_MAX      32000
 
+#ifdef USE_MOTOROLA_CODE
+// BEGIN MOT GB UPMERGE, a5705c, 12/21/2010
+int dhcp_init_ifc(const char *ifname,
+                  bool is_primary, const char *subnets,
+                  bool is_renewal)
+// END MOT GB UPMERGE
+#else
 int dhcp_init_ifc(const char *ifname)
+#endif
 {
     dhcp_msg discover_msg;
     dhcp_msg request_msg;
@@ -434,8 +585,21 @@ int dhcp_init_ifc(const char *ifname)
     s = open_raw_socket(ifname, hwaddr, if_index);
 
     timeout = TIMEOUT_INITIAL;
+#ifdef USE_MOTOROLA_CODE
+    if (is_renewal) {
+        state = STATE_RENEWING;
+        if (is_primary)
+            info = last_good_info;
+        else
+            info = dhcp_tunnel_info;
+    } else {
+        state = STATE_SELECTING;
+        info.type = 0;
+    }
+#else
     state = STATE_SELECTING;
     info.type = 0;
+#endif
     goto transmit;
 
     for (;;) {
@@ -450,9 +614,17 @@ int dhcp_init_ifc(const char *ifname)
 #endif
             if (timeout >= TIMEOUT_MAX) {
                 printerr("timed out\n");
+#ifdef USE_MOTOROLA_CODE
+                if ( state != STATE_RENEWING && info.type == DHCPOFFER ) {
+                    printerr("no acknowledgement from DHCP server\nconfiguring %s with offered parameters\n", ifname);
+                    // BEGIN MOT GB UPMERGE, a5705c, 12/21/2010
+                    return ifc_configure(ifname, &info, is_primary, subnets);
+                    // END MOT GB UPMERGE
+#else
                 if ( info.type == DHCPOFFER ) {
                     printerr("no acknowledgement from DHCP server\nconfiguring %s with offered parameters\n", ifname);
                     return ifc_configure(ifname, &info);
+#endif
                 }
                 errno = ETIME;
                 close(s);
@@ -472,6 +644,12 @@ int dhcp_init_ifc(const char *ifname)
                 msg = &request_msg;
                 size = init_dhcp_request_msg(msg, hwaddr, xid, info.ipaddr, info.serveraddr);
                 break;
+#ifdef USE_MOTOROLA_CODE
+            case STATE_RENEWING:
+                msg = &request_msg;
+                size = init_dhcp_renew_msg(msg, hwaddr, xid, info.ipaddr);
+                break;
+#endif
             default:
                 r = 0;
             }
@@ -533,7 +711,13 @@ int dhcp_init_ifc(const char *ifname)
             if (info.type == DHCPACK) {
                 printerr("configuring %s\n", ifname);
                 close(s);
+#ifdef USE_MOTOROLA_CODE
+                // BEGIN MOT GB UPMERGE, a5705c, 12/21/2010
+                return ifc_configure(ifname, &info, is_primary, subnets);
+                // END MOT GB UPMERGE
+#else
                 return ifc_configure(ifname, &info);
+#endif
             } else if (info.type == DHCPNAK) {
                 printerr("configuration request denied\n");
                 close(s);
@@ -543,6 +727,26 @@ int dhcp_init_ifc(const char *ifname)
                          dhcp_type_to_name(info.type), state);
             }
             break;
+#ifdef USE_MOTOROLA_CODE
+        case STATE_RENEWING:
+            if (info.type == DHCPACK) {
+                printerr("renewing %s\n", ifname);
+                if (is_primary)
+                    last_good_info = info;
+                else
+                    dhcp_tunnel_info = info;
+                close(s);
+                return 0;
+            } else if (info.type == DHCPNAK) {
+                printerr("renewal request denied\n");
+                close(s);
+                return -1;
+            } else {
+                printerr("ignoring %s message in state %d\n",
+                         dhcp_type_to_name(info.type), state);
+            }
+            break;
+#endif
         }
     }
     close(s);
@@ -561,5 +765,42 @@ int do_dhcp(char *iname)
         return -1;
     }
 
+#ifndef USE_MOTOROLA_CODE
     return dhcp_init_ifc(iname);
 }
+#else
+    // BEGIN MOT GB UPMERGE, a5705c, 12/21/2010
+    return dhcp_init_ifc(iname, true, NULL, false);
+}
+
+int do_dhcp_as_secondary(char *iname, char *subnets)
+{
+    if (ifc_up(iname)) {
+        printerr("failed to bring up interface %s: %s\n", iname, strerror(errno));
+        return -1;
+    }
+
+    return dhcp_init_ifc(iname, false, subnets, false);
+}
+
+int do_dhcp_renewal(char *iname)
+{
+    int rc = -1;
+    if (ifc_up(iname)) {
+        printerr("failed to bring up interface %s: %s\n",
+                 iname, strerror(errno));
+        goto out;
+    }
+    rc =  dhcp_init_ifc(iname, false, NULL, true);
+ out:
+    if (rc < 0) {
+        char status_prop_name[PROPERTY_KEY_MAX];
+        snprintf(status_prop_name, sizeof(status_prop_name),
+                 "vpn.net.%s.status", iname);
+        property_set(status_prop_name, TUN_STATUS_EXPIRED);
+    }
+    return rc;
+}
+// END MOT GB UPMERGE
+#endif
+

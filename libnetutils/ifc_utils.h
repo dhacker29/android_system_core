@@ -17,6 +17,12 @@
 #ifndef _IFC_UTILS_H_
 #define _IFC_UTILS_H_
 
+#ifdef USE_MOTOROLA_CODE
+/* BEGIN MOT GB UPMERGE, a5705c, 12/21/2010 */
+#include <netinet/in.h>
+/* END MOT GB UPMERGE */
+#endif
+
 int ifc_init(void);
 
 int ifc_get_ifindex(const char *name, int *if_indexp);
@@ -29,7 +35,13 @@ int ifc_set_addr(const char *name, unsigned addr);
 int ifc_set_mask(const char *name, unsigned mask);
 
 int ifc_create_default_route(const char *name, unsigned addr);
+#ifdef USE_MOTOTOLA_CODE
+/* BEGIN MOT GB UPMERGE, a5705c, 12/21/2010 */
+int ifc_create_secondary_route(const char *name, unsigned addr,
+                               unsigned mask, unsigned gateway);
+/* END MOT GB UPMERGE */
 
+#endif
 int ifc_get_info(const char *name, unsigned *addr, unsigned *mask, unsigned *flags);
 
 #endif

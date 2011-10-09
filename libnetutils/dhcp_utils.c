@@ -32,6 +32,11 @@ static const char DAEMON_NAME_RENEW[]  = "iprenew";
 static const int  NAP_TIME = 1;   /* wait for 1 second at a time */
                                   /* when polling for property values */
 static char errmsg[100];
+#ifdef USE_MOTOROLA_CODE
+static int autoip_enabled[3] = {0, 0, 0};//autoip_enabled[0] for wifi, autoip_enabled[1] for bluetooth,
+                                         //autoip_enabled[2] for USB Ethernet feature 35480, Motorola, e7976c, 01/13/2011, IKHALFMWK-192.
+#endif
+
 
 /*
  * Wait for a system property to be assigned a specified value.
@@ -116,6 +121,28 @@ static void fill_ip_info(const char *interface,
     }
 }
 
+#ifdef USE_MOTOROLA_CODE
+// BEGIN MOT GB UPMERGE, a5705c, 12/21/2010
+// BEGIN Motorola, w20079, Jan-15-2010, IKMAPFOUR-28 / Changed for auto ip feature
+static int get_device_type(const char * interface)
+{
+    //tiwlan0 and eth0 means WiFi
+    if( strcmp(interface, "tiwlan0") == 0 || strcmp(interface, "eth0") == 0 ) {
+        return 0;
+    } else if( strcmp(interface, "bnep0") == 0 ) {
+        return 1;
+    //BEGIN Motorola, e7976c, 01/13/2011, IKHALFMWK-192:feature 35480: Support for USB to Ethernet adaptor through Olympus HD Dock
+    } else if( strcmp(interface, "usbeth0") == 0 ) {
+        return 2;
+    //END Motorola, e7976c, 01/13/2011, IKHALFMWK-192:feature 35480
+    } else {
+        //unknow type
+        return -1;
+    }
+}
+// END MOT GB UPMERGE
+#endif
+
 /*
  * Start the dhcp client daemon, and wait for it to finish
  * configuring the interface.
@@ -147,12 +174,36 @@ int dhcp_do_request(const char *interface,
     /* Erase any previous setting of the dhcp result property */
     property_set(result_prop_name, "");
 
+#ifdef USE_MOTOROLA_CODE
+    // BEGIN MOT GB UPMERGE, a5705c, 12/21/2010
+    // Changed for auto ip feature
+    int wait_time = 30;
+    char * dhcp_param = "-ABKL";
+    int wifiorbt = get_device_type(interface);
+    if (wifiorbt < 0) return -1;
+    if( autoip_enabled[wifiorbt] ) {
+        wait_time = 90;
+        dhcp_param = "-BK";
+    } 
+    //END MOT GB UPMERGE
+#endif
+
     /* Start the daemon and wait until it's ready */
     if (property_get(HOSTNAME_PROP_NAME, prop_value, NULL) && (prop_value[0] != '\0'))
+#ifdef USE_MOTOROLA_CODE
+        snprintf(daemon_cmd, sizeof(daemon_cmd), "%s_%s:-h %s %s %s", DAEMON_NAME, interface,
+                 prop_value, dhcp_param, interface);
+#else
         snprintf(daemon_cmd, sizeof(daemon_cmd), "%s_%s:-h %s %s", DAEMON_NAME, interface,
                  prop_value, interface);
+#endif
     else
+#ifdef USE_MOTOROLA_CODE
+        snprintf(daemon_cmd, sizeof(daemon_cmd), "%s_%s:%s %s", DAEMON_NAME, interface, dhcp_param, interface);
+#else
         snprintf(daemon_cmd, sizeof(daemon_cmd), "%s_%s:%s", DAEMON_NAME, interface, interface);
+#endif
+
     memset(prop_value, '\0', PROPERTY_VALUE_MAX);
     property_set(ctrl_prop, daemon_cmd);
     if (wait_for_property(daemon_prop_name, desired_status, 10) < 0) {
@@ -161,7 +212,11 @@ int dhcp_do_request(const char *interface,
     }
 
     /* Wait for the daemon to return a result */
+#ifdef USE_MOTOROLA_CODE
+    if (wait_for_property(result_prop_name, NULL, wait_time) < 0) {
+#else
     if (wait_for_property(result_prop_name, NULL, 30) < 0) {
+#endif
         snprintf(errmsg, sizeof(errmsg), "%s", "Timed out waiting for DHCP to finish");
         return -1;
     }
@@ -171,7 +226,15 @@ int dhcp_do_request(const char *interface,
         snprintf(errmsg, sizeof(errmsg), "%s", "DHCP result property was not set");
         return -1;
     }
+#ifdef USE_MOTOROLA_CODE
+
+    // BEGIN MOT GB UPMERGE, a5705c, 12/21/2010
+    // Changed for auto ip feature
+    if ((strcmp(prop_value, "ok") == 0) || (strcmp(prop_value, "limited") == 0)) {
+    // END MOT GB UPMERGE
+#else
     if (strcmp(prop_value, "ok") == 0) {
+#endif
         fill_ip_info(interface, ipaddr, gateway, mask, dns1, dns2, server, lease);
         return 0;
     } else {
@@ -238,6 +301,73 @@ char *dhcp_get_errmsg() {
     return errmsg;
 }
 
+#ifdef USE_MOTOROLA_CODE
+// BEGIN MOT GB UPMERGE, a5705c, 12/21/2010
+int dhcp_get_state(const char *interface,
+                    in_addr_t *ipaddr,
+                    in_addr_t *gateway,
+                    in_addr_t *mask,
+                    in_addr_t *dns1,
+                    in_addr_t *dns2,
+                    in_addr_t *server,
+                    uint32_t  *lease) {
+    int result=0;
+    char result_prop_name[PROPERTY_KEY_MAX];
+    char prop_value[PROPERTY_VALUE_MAX] = "null";
+
+    snprintf(result_prop_name, sizeof(result_prop_name), "%s.%s.result",
+            DHCP_PROP_NAME_PREFIX,
+            interface);
+
+    // Changed for auto ip feature
+    int wifiorbt = get_device_type(interface);
+    if( wifiorbt < 0 ) {
+        *ipaddr=0;
+        *gateway=0;
+        *mask=0;
+        *dns1=0;
+        *dns2=0;
+        *server=0;
+        return 0;
+    }
+
+    if (!property_get(result_prop_name, prop_value, NULL)) {
+        /* shouldn't ever happen, given the success of wait_for_property() */
+        snprintf(errmsg, sizeof(errmsg), "%s", "dhcp_get_state:DHCP result property was not set");
+    }
+
+    if (strcmp(prop_value, "ok") == 0)
+        result=1;
+    else if (strcmp(prop_value, "limited") == 0)
+        result=2;
+
+    if (result)
+        fill_ip_info(interface, ipaddr, gateway, mask, dns1, dns2, server, lease);
+    else {
+        *ipaddr=0;
+        *gateway=0;
+        *mask=0;
+        *dns1=0;
+        *dns2=0;
+        *server=0;
+    }
+
+    return result;
+}
+#endif
+
+void set_autoip(const char *interface, int value)
+{
+    value = value ? 1 : 0;
+    int wifiorbt = get_device_type(interface);
+    if( wifiorbt >= 0 ) {
+        if( autoip_enabled[wifiorbt] != value ) {
+            dhcp_stop(interface);
+            autoip_enabled[wifiorbt] = value;
+        }
+    }
+}
+// END MOT GB UPMERGE
 /**
  * Run WiMAX dhcp renew service.
  * "wimax_renew" service shoud be included in init.rc.

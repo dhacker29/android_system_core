@@ -29,6 +29,13 @@
 #include <linux/if.h>
 #include <linux/sockios.h>
 #include <linux/route.h>
+#ifdef USE_MOTOROLA_CODE
+/* BEGIN MOT GB UPMERGE, a5705c, 12/21/2010 */
+#include <linux/ipv6_route.h>
+#include <netdb.h>
+#include <net/if.h>
+/* END MOT GB UPMERGE */
+#endif
 #include <linux/wireless.h>
 
 #ifdef ANDROID
@@ -43,6 +50,9 @@
 #endif
 
 static int ifc_ctl_sock = -1;
+#ifdef USE_MOTOROLA_CODE
+static int ifc_ctl_sock6 = -1; /* MOT GB UPMERGE, a5705c, 12/21/2010 */
+#endif
 void printerr(char *fmt, ...);
 
 static const char *ipaddr_to_string(uint32_t addr)
@@ -64,13 +74,50 @@ int ifc_init(void)
     return ifc_ctl_sock < 0 ? -1 : 0;
 }
 
+#ifdef USE_MOTOROLA_CODE
+/* BEGIN MOT GB UPMERGE, a5705c, 12/21/2010 */
+int ifc_init6(void)
+{
+    if (ifc_ctl_sock6 == -1) {
+        ifc_ctl_sock6 = socket(AF_INET6, SOCK_DGRAM, 0);
+        if (ifc_ctl_sock6 < 0) {
+            printerr("socket() failed: %s\n", strerror(errno));
+        }
+    }
+    return ifc_ctl_sock6 < 0 ? -1 : 0;
+}
+/* END MOT GB UPMERGE */
+#endif
+
 void ifc_close(void)
 {
+#ifdef USE_MOTOROLA_CODE
+    /* BEGIN MOT GB UPMERGE, a5705c, 12/21/2010 */
+    /*if (ifc_ctl_sock != -1) {
+        (void)close(ifc_ctl_sock);
+        ifc_ctl_sock = -1;
+    }*/
+    /* END MOT GB UPMERGE */
+#else
     if (ifc_ctl_sock != -1) {
         (void)close(ifc_ctl_sock);
         ifc_ctl_sock = -1;
     }
+
+#endif
 }
+
+#ifdef USE_MOTOROLA_CODE
+/* BEGIN MOT GB UPMERGE, a5705c, 12/21/2010 */
+void ifc_close6(void)
+{
+    if (ifc_ctl_sock6 != -1) {
+        (void)close(ifc_ctl_sock6);
+        ifc_ctl_sock6 = -1;
+    }
+}
+/* END MOT GB UPMERGE */
+#endif
 
 static void ifc_init_ifr(const char *name, struct ifreq *ifr)
 {
@@ -185,7 +232,64 @@ int ifc_get_info(const char *name, in_addr_t *addr, in_addr_t *mask, unsigned *f
     return 0;
 }
 
+#ifdef USE_MOTOROLA_CODE
+/* BEGIN MOT GB UPMERGE, a5705c, 12/21/2010 */
+in_addr_t get_ipv4_netmask(int prefix_length)
+{
+    in_addr_t mask = 0;
 
+    mask = ~mask << (32 - prefix_length);
+    mask = htonl(mask);
+
+    return mask;
+}
+
+int ifc_add_ipv4_route(const char *ifname, struct in_addr dst, int prefix_length,
+      struct in_addr gw)
+{
+    struct rtentry rt;
+    int result;
+    in_addr_t netmask;
+
+    memset(&rt, 0, sizeof(rt));
+
+    rt.rt_dst.sa_family = AF_INET;
+    rt.rt_dev = (void*) ifname;
+
+    netmask = get_ipv4_netmask(prefix_length);
+    init_sockaddr_in(&rt.rt_genmask, netmask);
+    init_sockaddr_in(&rt.rt_dst, dst.s_addr);
+    rt.rt_flags = RTF_UP;
+
+    if (prefix_length == 32) {
+        rt.rt_flags |= RTF_HOST;
+    }
+
+    if (gw.s_addr != 0) {
+        rt.rt_flags |= RTF_GATEWAY;
+        init_sockaddr_in(&rt.rt_gateway, gw.s_addr);
+    }
+
+    ifc_init();
+
+    if (ifc_ctl_sock < 0) {
+        return -errno;
+    }
+
+    result = ioctl(ifc_ctl_sock, SIOCADDRT, &rt);
+    if (result < 0) {
+        if (errno == EEXIST) {
+            result = 0;
+        } else {
+            result = -errno;
+        }
+    }
+    ifc_close();
+    return result;
+}
+/* END MOT GB UPMERGE */
+
+#endif
 int ifc_create_default_route(const char *name, in_addr_t addr)
 {
     struct rtentry rt;
@@ -200,6 +304,25 @@ int ifc_create_default_route(const char *name, in_addr_t addr)
     
     return ioctl(ifc_ctl_sock, SIOCADDRT, &rt);
 }
+
+#ifdef USE_MOTOROLA_CODE
+/* BEGIN MOT GB UPMERGE, a5705c, 12/21/2010 */
+int ifc_create_secondary_route(const char *name,
+                               in_addr_t addr,
+                               in_addr_t mask,
+                               in_addr_t gateway)
+{
+    struct rtentry rt;
+    memset(&rt, 0, sizeof(rt));
+    rt.rt_flags = RTF_UP | RTF_GATEWAY;
+    rt.rt_dev = (void*)name;
+    init_sockaddr_in(&rt.rt_dst, addr & mask);
+    init_sockaddr_in(&rt.rt_genmask, mask);
+    init_sockaddr_in(&rt.rt_gateway, gateway);
+    return ioctl(ifc_ctl_sock, SIOCADDRT, &rt);
+}
+/* END MOT GB UPMERGE */
+#endif
 
 int ifc_add_host_route(const char *name, in_addr_t addr)
 {
@@ -393,6 +516,58 @@ int ifc_remove_default_route(const char *ifname)
     ifc_close();
     return result;
 }
+#ifdef USE_MOTOROLA_CODE
+
+// BEGIN MOTOROLA a13803 03/05/2011, IKSTABLEFOUR-7639: Default route management for IPv6
+/*
+ * Removes the default route for the named interface and gateway.
+ */
+int ifc_remove_default_route6(const char *ifname, const char *gw)
+{
+    int result;
+    struct addrinfo hints, *gw_ai;
+    struct ifreq ifr;
+    struct in6_rtmsg ipv6route;
+    struct sockaddr_in6 ipv6_gw;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;  /* Allow IPv4 or IPv6 */
+    hints.ai_flags = AI_NUMERICHOST;
+
+    result = getaddrinfo(gw, NULL, &hints, &gw_ai);
+    if (result != 0) {
+        LOGD("getaddrinfo failed: invalid gateway %s\n", gw);
+        return -EINVAL;
+    }
+
+    ifc_init6();
+    memcpy(&ipv6_gw, gw_ai->ai_addr, sizeof(struct sockaddr_in6));
+    memset (&ipv6route,0,sizeof(ipv6route));
+    strncpy(ifr.ifr_name,ifname, sizeof(ifr.ifr_name));
+    //Get the index of the interface
+    if (ioctl(ifc_ctl_sock6, SIOGIFINDEX, &ifr, sizeof(ifr)) < 0)
+    {
+        LOGD("SIOGIFINDEX error\n");
+        freeaddrinfo(gw_ai);
+        return -EINVAL;
+    }
+
+    ipv6route.rtmsg_flags = RTF_DEFAULT | RTF_UP | RTF_GATEWAY;
+    memcpy(&ipv6route.rtmsg_gateway, &ipv6_gw.sin6_addr, sizeof( struct in6_addr));
+    ipv6route.rtmsg_ifindex=ifr.ifr_ifindex;
+    if (ioctl(ifc_ctl_sock6, SIOCDELRT, &ipv6route, sizeof(ipv6route)) <0)
+    {
+        LOGD("SIOCDELRT v6 error\n");
+        freeaddrinfo(gw_ai);
+        return -EINVAL;
+    }
+    freeaddrinfo(gw_ai);
+    ifc_close6();
+
+    return 0;
+}
+// END IKSTABLEFOUR-7639
+#endif
 
 int
 ifc_configure(const char *ifname,
@@ -431,8 +606,214 @@ ifc_configure(const char *ifname,
 
     snprintf(dns_prop_name, sizeof(dns_prop_name), "dhcp.%s.dns1", ifname);
     property_set(dns_prop_name, dns1 ? ipaddr_to_string(dns1) : "");
+#ifdef USE_MOTOROLA_CODE
+    /* BEGIN MOT GB UPMERGE, a5705c, 12/21/2010 */
+    snprintf(dns_prop_name, sizeof(dns_prop_name), "net.dns1", ifname);
+    property_set(dns_prop_name, dns1 ? ipaddr_to_string(dns1) : "");
+    /* END MOT GB UPMERGE */
+#endif
     snprintf(dns_prop_name, sizeof(dns_prop_name), "dhcp.%s.dns2", ifname);
     property_set(dns_prop_name, dns2 ? ipaddr_to_string(dns2) : "");
+#ifdef USE_MOTOROLA_CODE
+    /* BEGIN MOT GB UPMERGE, a5705c, 12/21/2010 */
+    snprintf(dns_prop_name, sizeof(dns_prop_name), "net.dns2", ifname);
+    property_set(dns_prop_name, dns2 ? ipaddr_to_string(dns2) : "");
+    /* END MOT GB UPMERGE */
 
+#endif
     return 0;
 }
+
+#ifdef USE_MOTOROLA_CODE
+/* BEGIN MOT GB UPMERGE, a5705c, 12/21/2010 */
+// BEGIN MOTOROLA a13803 03/05/2011, IKSTABLEFOUR-7639: Default route management for IPv6
+/*
+ * Sets the specified gateway as the default route for the named interface for IPv6.
+ */
+int ifc_set_default_route6(const char *ifname, struct in6_addr gw)
+{
+    struct in6_rtmsg rtmsg;
+    int result;
+    int ifindex;
+
+    memset(&rtmsg, 0, sizeof(rtmsg));
+
+    ifindex = if_nametoindex(ifname);
+    if (ifindex == 0) {
+        printerr("if_nametoindex() failed: interface %s\n", ifname);
+        return -ENXIO;
+    }
+
+    rtmsg.rtmsg_ifindex = ifindex;
+    rtmsg.rtmsg_flags = RTF_UP | RTF_DEFAULT | RTF_GATEWAY;
+
+    if (memcmp(&gw, &in6addr_any, sizeof(in6addr_any))) {
+        rtmsg.rtmsg_flags |= RTF_GATEWAY;
+        rtmsg.rtmsg_gateway = gw;
+    }
+
+    ifc_init6();
+
+    if (ifc_ctl_sock6 < 0) {
+        return -errno;
+    }
+
+    result = ioctl(ifc_ctl_sock6, SIOCADDRT, &rtmsg);
+    if (result < 0) {
+        if (errno == EEXIST) {
+            result = 0;
+        } else {
+            result = -errno;
+        }
+    }
+    ifc_close6();
+    return result;
+}
+// END IKSTABLEFOUR-7639
+
+int ifc_add_ipv6_route(const char *ifname, struct in6_addr dst, int prefix_length,
+      struct in6_addr gw)
+{
+    struct in6_rtmsg rtmsg;
+    int result;
+    int ifindex;
+
+    memset(&rtmsg, 0, sizeof(rtmsg));
+
+    ifindex = if_nametoindex(ifname);
+    if (ifindex == 0) {
+        printerr("if_nametoindex() failed: interface %s\n", ifname);
+        return -ENXIO;
+    }
+
+    rtmsg.rtmsg_ifindex = ifindex;
+    rtmsg.rtmsg_dst = dst;
+    rtmsg.rtmsg_dst_len = prefix_length;
+    rtmsg.rtmsg_flags = RTF_UP;
+
+    if (prefix_length == 128) {
+        rtmsg.rtmsg_flags |= RTF_HOST;
+    }
+
+    if (memcmp(&gw, &in6addr_any, sizeof(in6addr_any))) {
+        rtmsg.rtmsg_flags |= RTF_GATEWAY;
+        rtmsg.rtmsg_gateway = gw;
+    }
+
+    ifc_init6();
+
+    if (ifc_ctl_sock6 < 0) {
+        return -errno;
+    }
+
+    result = ioctl(ifc_ctl_sock6, SIOCADDRT, &rtmsg);
+    if (result < 0) {
+        if (errno == EEXIST) {
+            result = 0;
+        } else {
+            result = -errno;
+        }
+    }
+    ifc_close6();
+    return result;
+}
+
+// BEGIN MOTOROLA a13803 03/05/2011, IKSTABLEFOUR-7639: Default route management for IPv6
+int ifc_set_default_class_route(const char *ifname, const char *gw)
+{
+    int ret = 0;
+    struct sockaddr_in ipv4_gw;
+    struct sockaddr_in6 ipv6_gw;
+    struct addrinfo hints, *gw_ai;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;  /* Allow IPv4 or IPv6 */
+    hints.ai_flags = AI_NUMERICHOST;
+
+    ret = getaddrinfo(gw, NULL, &hints, &gw_ai);
+    if (ret != 0) {
+        printerr("getaddrinfo failed: invalid gateway %s\n", gw);
+        return -EINVAL;
+    }
+
+    if (gw_ai->ai_family == AF_INET6) {
+        memcpy(&ipv6_gw, gw_ai->ai_addr, sizeof(struct sockaddr_in6));
+        ret = ifc_set_default_route6(ifname, ipv6_gw.sin6_addr);
+    } else if (gw_ai->ai_family == AF_INET) {
+        memcpy(&ipv4_gw, gw_ai->ai_addr, sizeof(struct sockaddr_in));
+        ret = ifc_set_default_route(ifname, ipv4_gw.sin_addr.s_addr);
+    } else {
+        printerr("ifc_set_default_class_route: getaddrinfo error unsupported address family %d\n",
+                  gw_ai->ai_family);
+        ret = -EAFNOSUPPORT;
+    }
+
+    freeaddrinfo(gw_ai);
+    return ret;
+}
+// END IKSTABLEFOUR-7639
+
+int ifc_add_route(const char *ifname, const char *dst, int prefix_length,
+      const char *gw)
+{
+    int ret = 0;
+    struct sockaddr_in ipv4_dst, ipv4_gw;
+    struct sockaddr_in6 ipv6_dst, ipv6_gw;
+    struct addrinfo hints, *addr_ai, *gw_ai;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;  /* Allow IPv4 or IPv6 */
+    hints.ai_flags = AI_NUMERICHOST;
+
+    ret = getaddrinfo(dst, NULL, &hints, &addr_ai);
+
+    if (ret != 0) {
+        printerr("getaddrinfo failed: invalid address %s\n", dst);
+        return -EINVAL;
+    }
+
+    if (gw == NULL) {
+        if (addr_ai->ai_family == AF_INET6) {
+            gw = "::";
+        } else if (addr_ai->ai_family == AF_INET) {
+            gw = "0.0.0.0";
+        }
+    }
+
+    ret = getaddrinfo(gw, NULL, &hints, &gw_ai);
+    if (ret != 0) {
+        printerr("getaddrinfo failed: invalid gateway %s\n", gw);
+        freeaddrinfo(addr_ai);
+        return -EINVAL;
+    }
+
+    if (addr_ai->ai_family != gw_ai->ai_family) {
+        printerr("ifc_add_route: different address families: %s and %s\n", dst, gw);
+        freeaddrinfo(addr_ai);
+        freeaddrinfo(gw_ai);
+        return -EINVAL;
+    }
+
+    if (addr_ai->ai_family == AF_INET6) {
+        memcpy(&ipv6_dst, addr_ai->ai_addr, sizeof(struct sockaddr_in6));
+        memcpy(&ipv6_gw, gw_ai->ai_addr, sizeof(struct sockaddr_in6));
+        ret = ifc_add_ipv6_route(ifname, ipv6_dst.sin6_addr, prefix_length,
+              ipv6_gw.sin6_addr);
+    } else if (addr_ai->ai_family == AF_INET) {
+        memcpy(&ipv4_dst, addr_ai->ai_addr, sizeof(struct sockaddr_in));
+        memcpy(&ipv4_gw, gw_ai->ai_addr, sizeof(struct sockaddr_in));
+        ret = ifc_add_ipv4_route(ifname, ipv4_dst.sin_addr, prefix_length,
+              ipv4_gw.sin_addr);
+    } else {
+        printerr("ifc_add_route: getaddrinfo returned un supported address family %d\n",
+                  addr_ai->ai_family);
+        ret = -EAFNOSUPPORT;
+    }
+
+    freeaddrinfo(addr_ai);
+    freeaddrinfo(gw_ai);
+    return ret;
+}
+/* END MOT GB UPMERGE */
+
+#endif
