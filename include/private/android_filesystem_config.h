@@ -70,7 +70,7 @@
 #define AID_NET_RAW       3004  /* can create raw INET sockets */
 #define AID_NET_ADMIN     3005  /* can configure interfaces and routing tables. */
 
-#ifdef USE_MOTOROLA_CODE
+#ifdef USE_MOTOROLA_USERS
 #define AID_MOT_OSH       5000  /* OSH */
 #define AID_MOT_ACCY      9000  /* access to accessory */
 #define AID_MOT_PWRIC     9001  /* power IC */
@@ -128,7 +128,7 @@ static const struct android_id_info android_ids[] = {
     { "inet",      AID_INET, },
     { "net_raw",   AID_NET_RAW, },
     { "net_admin", AID_NET_ADMIN, },
-#ifdef USE_MOTOROLA_CODE
+#ifdef USE_MOTOROLA_USERS
     { "mot_osh",   AID_MOT_OSH, },
     { "mot_accy",  AID_MOT_ACCY, },
     { "mot_pwric", AID_MOT_PWRIC, },
@@ -163,7 +163,7 @@ struct fs_path_config {
 ** way up to the root.
 */
 
-#ifdef USE_MOTOROLA_CODE
+#ifdef USE_MOTOROLA_USERS
 static struct fs_path_config android_dirs[] = {
     { 00770, AID_SYSTEM, AID_CACHE,  "cache" },
     { 00777, AID_SYSTEM, AID_SYSTEM, "data/anr" },
@@ -227,7 +227,7 @@ static struct fs_path_config android_files[] = {
     { 00550, AID_ROOT,      AID_SHELL,     "system/etc/init.ril" },
     { 00550, AID_ROOT,      AID_SHELL,     "system/etc/init.testmenu" },
     { 00550, AID_DHCP,      AID_SHELL,     "system/etc/dhcpcd/dhcpcd-run-hooks" },
-#ifdef USE_MOTOROLA_CODE
+#ifdef USE_MOTOROLA_USERS
     { 00755, AID_ROOT,      AID_SHELL,     "system/etc/12m_files_copy.sh" },
 #endif
     { 00440, AID_BLUETOOTH, AID_BLUETOOTH, "system/etc/dbus.conf" },
@@ -241,7 +241,7 @@ static struct fs_path_config android_files[] = {
     { 00644, AID_SYSTEM,    AID_SYSTEM,    "data/app/*" },
     { 00644, AID_SYSTEM,    AID_SYSTEM,    "data/app-private/*" },
     { 00644, AID_APP,       AID_APP,       "data/data/*" },
-#ifdef USE_MOTOROLA_CODE
+#ifdef USE_MOTOROLA_USERS
     { 00660, AID_RADIO,     AID_RADIO,     "data/logger/bplogd.clog" },
     { 00660, AID_RADIO,     AID_RADIO,     "data/logger/bplogd.conf" },
 #endif
@@ -260,7 +260,7 @@ static struct fs_path_config android_files[] = {
     { 04770, AID_ROOT,      AID_RADIO,     "system/bin/pppd-ril" },
 		/* the following file is INTENTIONALLY set-uid, and IS included
 		 * in user builds. */
-#ifdef USE_MOTOROLA_CODE
+#ifdef USE_MOTOROLA_USERS
     { 00740, AID_ROOT,      AID_SYSTEM,    "system/bin/encryption_test" }, // njt784. IKSTABLETWOV-3378. BVS 33302 device encryption
 #endif
     { 06750, AID_ROOT,      AID_SHELL,     "system/bin/run-as" },
