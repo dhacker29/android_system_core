@@ -354,7 +354,6 @@ int dhcp_get_state(const char *interface,
 
     return result;
 }
-#endif
 
 void set_autoip(const char *interface, int value)
 {
@@ -367,6 +366,7 @@ void set_autoip(const char *interface, int value)
         }
     }
 }
+#endif
 // END MOT GB UPMERGE
 /**
  * Run WiMAX dhcp renew service.
