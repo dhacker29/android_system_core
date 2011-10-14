@@ -99,25 +99,3 @@ int init_dhcp_request_msg(dhcp_msg *msg, void *hwaddr, uint32_t xid,
     return DHCP_MSG_FIXED_SIZE + (x - msg->options);
 }
 
-#ifdef USE_MOTOROLA_CODE
-int init_dhcp_renew_msg(dhcp_msg *msg, void *hwaddr, uint32_t xid,
-                        uint32_t client_ipaddr)
-{
-    uint8_t *x;
-
-    x = init_dhcp_msg(msg, DHCPREQUEST, hwaddr, xid);
-    msg->ciaddr = client_ipaddr;
-
-    *x++ = OPT_PARAMETER_LIST;
-    *x++ = 4;
-    *x++ = OPT_SUBNET_MASK;
-    *x++ = OPT_GATEWAY;
-    *x++ = OPT_DNS;
-    *x++ = OPT_BROADCAST_ADDR;
-
-    *x++ = OPT_END;
-
-    return DHCP_MSG_FIXED_SIZE + (x - msg->options);
-}
-
-#endif

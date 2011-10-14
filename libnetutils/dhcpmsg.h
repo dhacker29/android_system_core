@@ -103,9 +103,4 @@ int init_dhcp_discover_msg(dhcp_msg *msg, void *hwaddr, uint32_t xid);
 int init_dhcp_request_msg(dhcp_msg *msg, void *hwaddr, uint32_t xid,
                           uint32_t ipaddr, uint32_t serveraddr);
 
-#ifdef USE_MOTOROLA_CODE
-int init_dhcp_renew_msg(dhcp_msg *msg, void *hwaddr, uint32_t xid,
-                        uint32_t client_ipaddr);
-#endif
-
 #endif
