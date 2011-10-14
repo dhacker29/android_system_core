@@ -402,7 +402,7 @@ err:
     free(links);
     return NULL;
 }
-#endf
+#endif
 
 static void handle_device_event(struct uevent *uevent)
 {

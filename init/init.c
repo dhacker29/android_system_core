@@ -70,6 +70,10 @@ static char bootloader[32];
 static char hardware[32];
 static unsigned revision = 0;
 static char qemu[32];
+#ifdef USE_MOTOROLA_CODE
+static char usbmode[32];
+static char memsize[32];
+#endif
 
 static struct action *cur_action = NULL;
 static struct command *cur_command = NULL;
@@ -716,12 +720,18 @@ int main(int argc, char **argv)
         return ueventd_main(argc, argv);
 
     /* clear the umask */
+
     umask(0);
 
         /* Get the basic filesystem setup we need put
          * together in the initramdisk on / and then we'll
          * let the rc file figure out the rest.
          */
+    /* Don't repeat the setup of these filesystems,
+     * it creates double mount points with an unknown effect
+     * on the system.  This init file is for 2nd-init anyway.
+     */
+#ifndef BOARD_HAS_LOCKED_BOOTLOADER
     mkdir("/dev", 0755);
     mkdir("/proc", 0755);
     mkdir("/sys", 0755);
@@ -741,6 +751,7 @@ int main(int argc, char **argv)
          */
     open_devnull_stdio();
     log_init();
+#endif
     
     INFO("reading config file\n");
     init_parse_config_file("/init.rc");
