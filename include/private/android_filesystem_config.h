@@ -52,6 +52,8 @@
 #define AID_VPN           1016  /* vpn system */
 #define AID_KEYSTORE      1017  /* keystore subsystem */
 #define AID_USB           1018  /* USB devices */
+#define AID_DRM           1019  /* DRM server */
+#define AID_DRMIO         1020  /* DRM IO server */
 #define AID_GPS           1021  /* GPS daemon */
 #define AID_UNUSED1       1022  /* deprecated, DO NOT USE */
 #define AID_RFU1          1023  /* RFU */
