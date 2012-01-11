@@ -106,18 +106,18 @@ struct {
     { "persist.mot.proximity.", AID_RADIO, 0},
     { "mot.backup_restore.",AID_MOT_TCMD, 0},
     { "mot.",             AID_MOT_TCMD, 0 },
-/* BEGIN Motorola, cjg040 */
+    /* BEGIN Motorola, cjg040 */
     { "sys.",             AID_MOT_OSH,  0 },
     { "hw.",              AID_MOT_OSH,  0 },
-/* END Motorola */
-    // Motorola, a22976, 20-Oct-2010, IKSTABLETWOV-3218
+    /* END Motorola */
+    /* Motorola, a22976, 20-Oct-2010, IKSTABLETWOV-3218 */
     { "cdma.nbpcd.supported", AID_RADIO, AID_RADIO },
-//BEGIN Motorola, IKSTABLE6-5050
+    /* BEGIN Motorola, IKSTABLE6-5050 */
     { "vzw.inactivetimer",   AID_RADIO,    0 },
     { "persist.ril",         AID_RADIO,    0 },
     { "persist.lte",         AID_RADIO,    0 },
-//END Motorola, IKSTABLE6-5050
-    // Motorola, vrwd38, IKSTABLEFOURV-3408
+    /* END Motorola, IKSTABLE6-5050 */
+    /* Motorola, vrwd38, IKSTABLEFOURV-3408 */
     { "hw.",              AID_MOT_WHISPER, 0 },
  #endif
     { "wimax.",           AID_SYSTEM,   1000 },
