@@ -21,7 +21,6 @@ TOOLS := \
 	stop \
 	notify \
 	cmp \
-	dmesg \
 	route \
 	hd \
 	dd \
@@ -47,6 +46,7 @@ TOOLS := \
 
 ifndef TINY_TOOLBOX
     TOOLS += \
+        dmesg \
         mkdir \
         ln \
         ls \
@@ -57,7 +57,7 @@ ifndef TINY_TOOLBOX
         chmod \
         chown \
         mv \
-        lsof	
+        lsof
 endif
 
 LOCAL_SRC_FILES:= \
@@ -68,10 +68,6 @@ LOCAL_STATIC_LIBRARIES := libreboot
 LOCAL_SHARED_LIBRARIES := libcutils libc
 
 LOCAL_MODULE:= toolbox
-
-ifneq ($(TARGET_RECOVERY_PRE_COMMAND),)
-	LOCAL_CFLAGS += -DTARGET_RECOVERY_PRE_COMMAND='$(TARGET_RECOVERY_PRE_COMMAND)'
-endif
 
 # Including this will define $(intermediates).
 #
